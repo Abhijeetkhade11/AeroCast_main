@@ -1,0 +1,29 @@
+{
+  "model_name": "ridge",
+  "model_type": "regressor",
+  "training_period": "2023-01-01 \u2014 2024-07-08",
+  "test_period": "2024-09-16 \u2014 2024-12-30",
+  "features": [
+    "sched_dep_hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "distance",
+    "hist_origin_delay_rate",
+    "hist_dest_delay_rate",
+    "hist_route_delay_rate",
+    "hist_airline_delay_rate",
+    "hist_origin_avg_delay",
+    "hist_congestion_proxy",
+    "wx_precip",
+    "wx_wind_speed",
+    "wx_temp",
+    "wx_visibility"
+  ],
+  "target": "DEP_DELAY (minutes, clipped at 0)",
+  "mae": 18.01,
+  "rmse": 26.52,
+  "r2": 0.0066,
+  "test_size": 739,
+  "trained_at": "2026-08-19T19:26:32.472449+00:00"
+}

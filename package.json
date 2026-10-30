@@ -1,0 +1,12 @@
+{
+  "name": "aerointel-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "setup": "powershell -NoProfile -ExecutionPolicy Bypass -File setup.ps1",
+    "start:all": "powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1",
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix frontend run start"
+  }
+}
