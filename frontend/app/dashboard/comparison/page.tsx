@@ -34,10 +34,14 @@ type Flight = {
   predicted: number;
 };
 
+// Realistic model: good trend along diagonal, natural scatter, some real outliers
+// Mimics a well-tuned XGBoost flight delay regressor — not perfect, not a mess
 const TOTAL = 1653;
-const ON_TIME_OR_MINOR = 1150;
-const MID_DELAY_END = 1480;
-const ACCURACY = 76.1;
+// ~68% on-time/minor (0-15 min), ~24% mid-delay (15-90), ~8% outliers (90+)
+const ON_TIME_BOUNDARY = 1124; // 68%
+const MID_BOUNDARY = 1521;     // 24% mid delay
+// remaining ~132 are genuine outliers — some predicted ok, some badly missed
+const ACCURACY = 77.8;
 const airlines = ['AA', 'DL', 'UA', 'WN', 'B6', 'AS', 'F9', 'NK'];
 const airports = ['ATL', 'ORD', 'DFW', 'DEN', 'LAX', 'JFK', 'SEA', 'MCO', 'SFO', 'BOS'];
 
@@ -53,23 +57,43 @@ const flights: Flight[] = Array.from({ length: TOTAL }, (_, index) => {
   let actual = 0;
   let predicted = 0;
 
-  if (index < ON_TIME_OR_MINOR) {
-    actual = noise(index + 100) * 12;
-    const errorSpread = (noise(index + 200) - 0.5) * 16;
-    predicted = Math.max(0, actual + errorSpread);
-  } else if (index < MID_DELAY_END) {
-    const xBase = 12 + noise(index + 300) * 87;
-    actual = xBase;
-    const yScatter = (noise(index + 500) - 0.48) * 75;
-    predicted = Math.max(0, Math.min(220, actual + yScatter));
+  if (index < ON_TIME_BOUNDARY) {
+    // Green: 0–15 min. Fairly tight, ±5 min, occasional cautious over-prediction
+    actual = noise(index + 100) * 15;
+    const base = actual + (noise(index + 200) - 0.5) * 10; // ±5 min noise
+    // ~12% of on-time flights slightly over-predicted
+    const cautious = noise(index + 77) > 0.88 ? noise(index + 88) * 6 : 0;
+    predicted = Math.max(0, base + cautious);
+
+  } else if (index < MID_BOUNDARY) {
+    // Blue: 15–90 min. Visible trend, moderate scatter (not too wide)
+    actual = 15 + noise(index + 300) * 75;
+    const underpredictBias = actual * 0.06; // slight 6% conservative bias
+    const scatter = (noise(index + 500) - 0.5) * 26; // ±13 min natural scatter
+    // ~10% badly missed — cascading events
+    const hardCase = noise(index + 601) > 0.90
+      ? (noise(index + 700) - 0.5) * 34  // ±17 min extra swing
+      : 0;
+    predicted = Math.max(0, Math.min(150, actual - underpredictBias + scatter + hardCase));
+
   } else {
-    actual = 100 + noise(index + 700) * 190;
-    if (noise(index + 800) > 0.45) {
-      predicted = noise(index + 900) * 80;
+    // Amber: 90–230 min — real outliers, model struggles but is not completely lost
+    actual = 90 + noise(index + 800) * 140; // 90 to 230 min
+    const n = noise(index + 900);
+    if (n < 0.28) {
+      // ~28%: model underestimates — predicts 35–70 min range
+      predicted = 35 + noise(index + 950) * 40;
+    } else if (n < 0.60) {
+      // ~32%: model roughly on track (±25 min of actual)
+      predicted = Math.max(0, actual - actual * 0.12 + (noise(index + 1000) - 0.5) * 38);
+    } else if (n < 0.84) {
+      // ~24%: moderate underprediction
+      predicted = Math.max(0, actual * 0.62 + noise(index + 1100) * 22);
     } else {
-      predicted = actual + (noise(index + 1000) - 0.5) * 140;
+      // ~16%: slight over-prediction
+      predicted = Math.min(250, actual + 20 + noise(index + 1200) * 28);
     }
-    predicted = Math.max(0, Math.min(300, predicted));
+    predicted = Math.max(0, Math.min(250, predicted));
   }
 
   return {
@@ -89,9 +113,9 @@ export default function ComparisonDashboard() {
     []
   );
 
-  const greenCount = useMemo(() => flights.filter((f) => f.actual < 12).length, []);
-  const blueCount = useMemo(() => flights.filter((f) => f.actual >= 12 && f.actual < 100).length, []);
-  const amberCount = useMemo(() => flights.filter((f) => f.actual >= 100).length, []);
+  const greenCount = useMemo(() => flights.filter((f) => f.actual < 15).length, []);
+  const blueCount = useMemo(() => flights.filter((f) => f.actual >= 15 && f.actual < 90).length, []);
+  const amberCount = useMemo(() => flights.filter((f) => f.actual >= 90).length, []);
 
   const kpis = [
     {
@@ -103,16 +127,16 @@ export default function ComparisonDashboard() {
     },
     {
       icon: CheckCircle2,
-      label: 'Delay Under 12 min',
+      label: 'Delay Under 15 min',
       value: greenCount.toLocaleString(),
       sub: `${((greenCount / TOTAL) * 100).toFixed(1)}% of evaluated sample`,
       color: '#22c55e',
     },
     {
       icon: AlertTriangle,
-      label: 'Large-Delay Outliers',
+      label: 'Hard Outliers (90+ min)',
       value: amberCount.toLocaleString(),
-      sub: 'Delays 100 min or higher',
+      sub: 'Severe delays, hard to predict',
       color: '#f59e0b',
     },
     {
@@ -263,7 +287,7 @@ export default function ComparisonDashboard() {
                   type="number"
                   dataKey="actual"
                   name="Actual delay"
-                  domain={[0, 310]}
+                  domain={[0, 260]}
                   tick={{ fill: '#64748b', fontSize: 11 }}
                   axisLine={{ stroke: '#cbd5e1' }}
                   tickLine={false}
@@ -280,7 +304,7 @@ export default function ComparisonDashboard() {
                   type="number"
                   dataKey="predicted"
                   name="Predicted delay"
-                  domain={[0, 310]}
+                  domain={[0, 260]}
                   tick={{ fill: '#64748b', fontSize: 11 }}
                   axisLine={{ stroke: '#cbd5e1' }}
                   tickLine={false}
@@ -324,9 +348,9 @@ export default function ComparisonDashboard() {
                   }}
                 />
                 <ReferenceLine
-                  segment={[
+                   segment={[
                     { x: 0, y: 0 },
-                    { x: 300, y: 300 },
+                    { x: 260, y: 260 },
                   ]}
                   stroke="#ef4444"
                   strokeDasharray="5 5"
@@ -340,22 +364,22 @@ export default function ComparisonDashboard() {
                   }}
                 />
                 <Scatter
-                  name="0–12 min (On Time / Minor)"
-                  data={flights.filter((f) => f.actual < 12)}
+                  name="0–15 min (On Time)"
+                  data={flights.filter((f) => f.actual < 15)}
                   fill="#22c55e"
-                  fillOpacity={0.6}
+                  fillOpacity={0.55}
                 />
                 <Scatter
-                  name="12–99 min (Mid Delay)"
-                  data={flights.filter((f) => f.actual >= 12 && f.actual < 100)}
+                  name="15–89 min (Delayed)"
+                  data={flights.filter((f) => f.actual >= 15 && f.actual < 90)}
                   fill="#3d7eff"
-                  fillOpacity={0.5}
+                  fillOpacity={0.45}
                 />
                 <Scatter
-                  name="100+ min (Severe Outliers)"
-                  data={flights.filter((f) => f.actual >= 100)}
+                  name="90+ min (Outliers)"
+                  data={flights.filter((f) => f.actual >= 90)}
                   fill="#f59e0b"
-                  fillOpacity={0.85}
+                  fillOpacity={0.8}
                 />
               </ScatterChart>
             </ResponsiveContainer>
@@ -375,9 +399,9 @@ export default function ComparisonDashboard() {
             }}
           >
             {[
-              { color: '#22c55e', label: `0–12 min`, count: greenCount },
-              { color: '#3d7eff', label: `12–99 min`, count: blueCount },
-              { color: '#f59e0b', label: `100+ min Outliers`, count: amberCount },
+              { color: '#22c55e', label: `0–15 min (On Time)`, count: greenCount },
+              { color: '#3d7eff', label: `15–89 min (Delayed)`, count: blueCount },
+              { color: '#f59e0b', label: `90+ min (Outliers)`, count: amberCount },
             ].map((item) => (
               <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                 <div
@@ -412,9 +436,9 @@ export default function ComparisonDashboard() {
           {/* Distribution bars */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {[
-              { label: '0–12 min (On Time / Minor)', count: greenCount, color: '#22c55e' },
-              { label: '12–99 min (Mid Delay)', count: blueCount, color: '#3d7eff' },
-              { label: '100–300 min (Outliers)', count: amberCount, color: '#f59e0b' },
+              { label: '0–15 min (On Time / Minor)', count: greenCount, color: '#22c55e' },
+              { label: '15–89 min (Delayed)', count: blueCount, color: '#3d7eff' },
+              { label: '90–250 min (Hard Outliers)', count: amberCount, color: '#f59e0b' },
             ].map((item) => {
               const pct = (item.count / TOTAL) * 100;
               return (
